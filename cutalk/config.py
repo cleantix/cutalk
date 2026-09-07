@@ -53,5 +53,9 @@ INLINE_CACHE_SIZE = int(os.getenv("INLINE_CACHE_SIZE", "128"))
 # В личке отвечать на каждое сообщение (там кубик кидать незачем)
 PRIVATE_ALWAYS_REPLY = os.getenv("PRIVATE_ALWAYS_REPLY", "1") not in ("0", "false", "False")
 
+# Сколько раз перегенерировать, если ответ оказался пустым или состоял
+# из одних команд (в обучающей выборке попадались команды других ботов)
+GEN_MAX_ATTEMPTS = int(os.getenv("GEN_MAX_ATTEMPTS", "3"))
+
 # Количество потоков torch на CPU (0 = не трогать)
 TORCH_THREADS = int(os.getenv("TORCH_THREADS", "0"))

@@ -1,6 +1,7 @@
 """Загрузка модели и генерация ответов. Всё синхронно и на CPU."""
 import logging
 import os
+import re
 import threading
 
 import torch
@@ -96,29 +97,53 @@ class Generator:
         prompt = self.build_prompt(history_lines)
         inputs = self.tokenizer(prompt, return_tensors="pt")
 
-        with _gen_lock, torch.inference_mode():
-            output = self.model.generate(
-                **inputs,
-                max_new_tokens=config.MAX_NEW_TOKENS,
-                do_sample=True,
-                temperature=config.TEMPERATURE,
-                top_k=config.TOP_K,
-                top_p=config.TOP_P,
-                repetition_penalty=config.REPETITION_PENALTY,
-                pad_token_id=self.tokenizer.pad_token_id,
-                stop_strings=["\n"],
-                tokenizer=self.tokenizer,
+        # Модель иногда выдаёт одни команды — тогда пробуем ещё раз,
+        # иначе бот слишком часто молчал бы
+        for attempt in range(1, config.GEN_MAX_ATTEMPTS + 1):
+            with _gen_lock, torch.inference_mode():
+                output = self.model.generate(
+                    **inputs,
+                    max_new_tokens=config.MAX_NEW_TOKENS,
+                    do_sample=True,
+                    temperature=config.TEMPERATURE,
+                    top_k=config.TOP_K,
+                    top_p=config.TOP_P,
+                    repetition_penalty=config.REPETITION_PENALTY,
+                    pad_token_id=self.tokenizer.pad_token_id,
+                    stop_strings=["\n"],
+                    tokenizer=self.tokenizer,
+                )
+
+            generated = output[0][inputs["input_ids"].shape[-1]:]
+            raw = self.tokenizer.decode(generated, skip_special_tokens=True)
+            text = clean_reply(raw)
+            if text:
+                return text
+            log.info(
+                "Попытка %d/%d дала пустой ответ после чистки (было: %r)",
+                attempt, config.GEN_MAX_ATTEMPTS, raw.strip()[:80],
             )
 
-        generated = output[0][inputs["input_ids"].shape[-1]:]
-        text = self.tokenizer.decode(generated, skip_special_tokens=True)
-        return clean_reply(text)
+        return ""
+
+
+# Команда в Telegram — это латиница/цифры/подчёркивание после слеша,
+# опционально с @имя_бота. Слеш должен стоять в начале или после пробела,
+# чтобы не резать "и/или" и "10/10".
+_COMMAND_RE = re.compile(r"(?:^|(?<=\s))/[A-Za-z][A-Za-z0-9_]*(?:@[A-Za-z0-9_]+)?\b")
 
 
 def clean_reply(text: str) -> str:
-    """Берём первую непустую строку и снимаем возможный префикс с именем."""
+    """Первая непустая строка без префикса с именем и без команд.
+
+    Пустая строка на выходе означает «отвечать нечем» — вызывающий код
+    либо перегенерирует, либо промолчит.
+    """
     text = text.strip().split("\n")[0].strip()
+
     prefix = f"{config.BOT_NAME}:"
     while text.lower().startswith(prefix.lower()):
         text = text[len(prefix):].strip()
-    return text
+
+    text = _COMMAND_RE.sub(" ", text)
+    return " ".join(text.split())
