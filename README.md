@@ -38,7 +38,14 @@ pip install -r requirements.txt --extra-index-url https://download.pytorch.org/w
 ```bash
 tar -xzf adapter.tar.gz     # получится ./adapter с adapter_config.json,
                             # adapter_model.safetensors и файлами токенизатора
+ls -d adapter               # проверьте, что папка называется именно так
 ```
+
+> **Грабли:** архив может развернуться в скрытую папку `.adapter` (с точкой) —
+> в Finder и в обычном `ls` её не видно. Тогда `./adapter` не существует, и
+> transformers принимает путь за имя репозитория на Hub, падая с
+> `HFValidationError: Repo id must use alphanumeric chars...`.
+> Лечится `mv .adapter adapter`. Бот проверяет это на старте и говорит прямым текстом.
 
 Настроить окружение:
 

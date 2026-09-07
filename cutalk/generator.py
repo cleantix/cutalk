@@ -1,5 +1,6 @@
 """Загрузка модели и генерация ответов. Всё синхронно и на CPU."""
 import logging
+import os
 import threading
 
 import torch
@@ -21,6 +22,8 @@ class Generator:
         self.model = None
 
     def load(self) -> None:
+        self._check_adapter()
+
         if config.TORCH_THREADS > 0:
             torch.set_num_threads(config.TORCH_THREADS)
             log.info("torch threads: %d", config.TORCH_THREADS)
@@ -51,6 +54,29 @@ class Generator:
 
         self.model = model
         log.info("Модель готова")
+
+    @staticmethod
+    def _check_adapter() -> None:
+        """Понятная ошибка вместо HFValidationError: transformers принимает
+        несуществующий локальный путь за repo id на Hugging Face Hub."""
+        path = config.ADAPTER_PATH
+        if not os.path.isdir(path):
+            raise RuntimeError(
+                f"Папка с адаптером не найдена: {path!r} "
+                f"(рабочая директория: {os.getcwd()}). "
+                "Распакуйте adapter.tar.gz рядом с main.py. Учтите, что архив "
+                "может развернуться в скрытую папку '.adapter' — переименуйте её "
+                "в 'adapter' или укажите путь через ADAPTER_PATH."
+            )
+        missing = [
+            f
+            for f in ("adapter_config.json", "adapter_model.safetensors")
+            if not os.path.isfile(os.path.join(path, f))
+        ]
+        if missing:
+            raise RuntimeError(
+                f"В папке {path!r} не хватает файлов адаптера: {', '.join(missing)}"
+            )
 
     def build_prompt(self, history_lines: list[str]) -> str:
         """История вида ["Имя: текст", ...] -> строка промпта через chat template."""
