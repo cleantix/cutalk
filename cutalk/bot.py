@@ -89,7 +89,11 @@ async def decide_and_reply(message: Message, reason: str) -> None:
 
     log.info("chat=%s: сгенерирован ответ: %r", chat_id, text)
     try:
-        await message.answer(text)
+        # Именно реплай на исходное сообщение: в живом чате за те секунды,
+        # что идёт генерация, успевают написать ещё, и ответ без привязки
+        # повисает непонятно к чему.
+        # allow_sending_without_reply — на случай, если сообщение успели удалить.
+        await message.reply(text, allow_sending_without_reply=True)
     except Exception:
         log.exception("chat=%s: не смог отправить сообщение", chat_id)
         return

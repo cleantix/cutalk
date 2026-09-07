@@ -12,8 +12,6 @@ from . import config
 
 log = logging.getLogger(__name__)
 
-# Генерация на CPU — тяжёлая и не потокобезопасная в смысле нагрузки:
-# держим один общий лок, чтобы не запускать две генерации одновременно.
 _gen_lock = threading.Lock()
 
 
@@ -38,7 +36,6 @@ class Generator:
                 config.BASE_MODEL, dtype=torch.bfloat16
             )
         except TypeError:
-            # transformers < 4.56: параметр назывался torch_dtype
             base_model = AutoModelForCausalLM.from_pretrained(
                 config.BASE_MODEL, torch_dtype=torch.bfloat16
             )
@@ -58,8 +55,6 @@ class Generator:
 
     @staticmethod
     def _check_adapter() -> None:
-        """Понятная ошибка вместо HFValidationError: transformers принимает
-        несуществующий локальный путь за repo id на Hugging Face Hub."""
         path = config.ADAPTER_PATH
         if not os.path.isdir(path):
             raise RuntimeError(
