@@ -41,6 +41,10 @@ known_chats: set[int] = set()
 # промежуточные версии недопечатанной фразы
 _inline_latest: dict[int, str] = {}
 _inline_cache: "OrderedDict[str, str]" = OrderedDict()
+# Генерации, которые прямо сейчас выполняются: кэш наполняется только по
+# завершении, а на CPU это секунды — без этого один и тот же текст успевает
+# уйти в очередь дважды
+_inline_inflight: dict[str, asyncio.Task] = {}
 
 
 def display_name(message: Message) -> str:
@@ -193,17 +197,28 @@ async def on_inline_query(query: InlineQuery) -> None:
             return
 
         name = query.from_user.full_name or query.from_user.username or "Человек"
-        log.info("inline: генерирую для %s: %r", name, text)
+        task = _inline_inflight.get(text)
+        mine = task is None
+        if mine:
+            log.info("inline: генерирую для %s: %r", name, text)
+            task = asyncio.create_task(generate_reply([f"{name}: {text}"]))
+            _inline_inflight[text] = task
+        else:
+            log.info("inline: %r уже генерируется, жду тот же результат", text)
         try:
-            reply = await generate_reply([f"{name}: {text}"])
+            reply = await task
         except Exception:
             log.exception("inline: ошибка генерации для %r", text)
             return
+        finally:
+            if mine:
+                _inline_inflight.pop(text, None)
         if not reply:
             log.info("inline: пустой результат для %r", text)
             return
         _cache_put(text, reply)
-        log.info("inline: результат %r", reply)
+        if mine:
+            log.info("inline: результат %r", reply)
 
     result = InlineQueryResultArticle(
         id=hashlib.md5(f"{text}|{reply}".encode()).hexdigest(),
