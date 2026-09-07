@@ -1,15 +1,23 @@
 """ЦУтолк — бот-разговорщик для групповых чатов."""
 import asyncio
 import contextlib
+import hashlib
 import logging
 import random
 import sys
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.enums import ChatAction
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import (
+    InlineQuery,
+    InlineQueryResultArticle,
+    InlineQueryResultsButton,
+    InputTextMessageContent,
+    Message,
+)
 
 from . import config, storage
 from .generator import Generator
@@ -28,6 +36,11 @@ generator = Generator()
 # Одна генерация за раз: модель на CPU, параллелить нечем
 executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="gen")
 known_chats: set[int] = set()
+
+# Последний inline-запрос каждого пользователя — чтобы не генерировать на
+# промежуточные версии недопечатанной фразы
+_inline_latest: dict[int, str] = {}
+_inline_cache: "OrderedDict[str, str]" = OrderedDict()
 
 
 def display_name(message: Message) -> str:
@@ -85,6 +98,18 @@ async def cmd_ping(message: Message) -> None:
     await message.answer("тут я")
 
 
+@dp.message(F.chat.type == "private", F.text)
+async def on_private_message(message: Message) -> None:
+    """В личке каждое сообщение адресовано боту, кубик не кидаем."""
+    text = (message.text or "").strip()
+    if not text:
+        return
+    storage.add_line(message.chat.id, display_name(message), text)
+    log.info("chat=%s (лс): сообщение %r", message.chat.id, text)
+    if config.PRIVATE_ALWAYS_REPLY:
+        await decide_and_reply(message, "личка")
+
+
 @dp.message(F.chat.type.in_(GROUP_TYPES), F.text)
 async def on_group_message(message: Message) -> None:
     chat_id = message.chat.id
@@ -120,6 +145,75 @@ async def on_group_message(message: Message) -> None:
         return
 
     await decide_and_reply(message, reason)
+
+
+def _cache_get(key: str) -> str | None:
+    value = _inline_cache.get(key)
+    if value is not None:
+        _inline_cache.move_to_end(key)
+    return value
+
+
+def _cache_put(key: str, value: str) -> None:
+    _inline_cache[key] = value
+    _inline_cache.move_to_end(key)
+    while len(_inline_cache) > config.INLINE_CACHE_SIZE:
+        _inline_cache.popitem(last=False)
+
+
+@dp.inline_query()
+async def on_inline_query(query: InlineQuery) -> None:
+    """Вызов вида "@botname текст" из любого чата, даже там, где бота нет."""
+    if not config.INLINE_ENABLED:
+        return
+
+    text = (query.query or "").strip()
+    user_id = query.from_user.id
+
+    if not text:
+        await query.answer(
+            [],
+            cache_time=1,
+            is_personal=True,
+            button=InlineQueryResultsButton(
+                text=f"Напишите текст — {config.BOT_NAME} его продолжит",
+                start_parameter="inline_help",
+            ),
+        )
+        return
+
+    reply = _cache_get(text)
+    if reply is None:
+        # Telegram шлёт запрос на каждое нажатие клавиши, а генерация на CPU
+        # занимает секунды — ждём паузы в наборе и бросаем устаревшие запросы
+        _inline_latest[user_id] = text
+        await asyncio.sleep(config.INLINE_DEBOUNCE)
+        if _inline_latest.get(user_id) != text:
+            log.info("inline: запрос %r устарел, пропускаю", text)
+            return
+
+        name = query.from_user.full_name or query.from_user.username or "Человек"
+        log.info("inline: генерирую для %s: %r", name, text)
+        try:
+            reply = await generate_reply([f"{name}: {text}"])
+        except Exception:
+            log.exception("inline: ошибка генерации для %r", text)
+            return
+        if not reply:
+            log.info("inline: пустой результат для %r", text)
+            return
+        _cache_put(text, reply)
+        log.info("inline: результат %r", reply)
+
+    result = InlineQueryResultArticle(
+        id=hashlib.md5(f"{text}|{reply}".encode()).hexdigest(),
+        title="Generated message",
+        description=reply,
+        input_message_content=InputTextMessageContent(message_text=reply),
+    )
+    with contextlib.suppress(Exception):
+        # запрос живёт недолго; если протух — молча забываем
+        await query.answer([result], cache_time=0, is_personal=True)
 
 
 async def proactive_loop(bot: Bot) -> None:

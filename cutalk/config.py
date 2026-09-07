@@ -43,5 +43,15 @@ TOP_K = int(os.getenv("TOP_K", "20"))
 TOP_P = float(os.getenv("TOP_P", "0.8"))
 REPETITION_PENALTY = float(os.getenv("REPETITION_PENALTY", "1.1"))
 
+# Inline-режим: вызов бота как "@botname текст" из любого чата
+INLINE_ENABLED = os.getenv("INLINE_ENABLED", "1") not in ("0", "false", "False")
+# Пауза перед генерацией: Telegram шлёт inline-запрос на каждое нажатие клавиши,
+# ждём, пока человек допечатает
+INLINE_DEBOUNCE = float(os.getenv("INLINE_DEBOUNCE", "0.7"))
+INLINE_CACHE_SIZE = int(os.getenv("INLINE_CACHE_SIZE", "128"))
+
+# В личке отвечать на каждое сообщение (там кубик кидать незачем)
+PRIVATE_ALWAYS_REPLY = os.getenv("PRIVATE_ALWAYS_REPLY", "1") not in ("0", "false", "False")
+
 # Количество потоков torch на CPU (0 = не трогать)
 TORCH_THREADS = int(os.getenv("TORCH_THREADS", "0"))
