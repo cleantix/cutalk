@@ -1,0 +1,10 @@
+# Ставить с CPU-индексом torch:
+#   pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
+aiogram>=3.7,<4
+torch>=2.2
+transformers>=4.42
+peft>=0.11
+accelerate>=0.30
+safetensors>=0.4
+sentencepiece>=0.2
+python-dotenv>=1.0

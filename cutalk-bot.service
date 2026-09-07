@@ -1,0 +1,24 @@
+[Unit]
+Description=CUtalk Telegram bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cutalk
+Group=cutalk
+WorkingDirectory=/opt/cutalk
+EnvironmentFile=/opt/cutalk/.env
+Environment=PYTHONUNBUFFERED=1
+Environment=HF_HOME=/opt/cutalk/.cache/huggingface
+ExecStart=/opt/cutalk/.venv/bin/python -u /opt/cutalk/main.py
+Restart=always
+RestartSec=10
+# Первая загрузка модели может занять минуты — не душим OOM-киллером сразу
+TimeoutStopSec=30
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cutalk-bot
+
+[Install]
+WantedBy=multi-user.target
